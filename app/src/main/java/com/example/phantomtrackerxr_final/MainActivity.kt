@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,7 +21,6 @@ import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
-import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
 import com.example.phantomtrackerxr_final.ui.theme.PhantomTrackerXR_FinalTheme
 import java.util.concurrent.ExecutorService
@@ -55,9 +53,35 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PhantomTrackerXR_FinalTheme {
-                // ⚠️ 2D 분기 체크 로직을 전부 제거하고, 무조건 Subspace(3D 공간)를 열도록 수정
+                // ⚠️ 말썽을 일으키던 환경 제어 코드는 모두 깔끔하게 날렸습니다.
+                // 대신 Subspace로 풀 스페이스 3D 공간만 확실하게 열어줍니다.
+
                 Subspace {
-                    MySpatialContent(overlayView = overlayView)
+                    SpatialPanel(
+                        modifier = SubspaceModifier
+                            .width(800.dp)
+                            .height(600.dp)
+                            .movable()
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+
+                            // 바운딩 박스만 그려줄 투명 도화지
+                            AndroidView(
+                                factory = { context -> overlayView },
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            // 생존 확인용 텍스트
+                            Text(
+                                text = "🟢 Full Space Active\nAI is running in background",
+                                color = Color.Green,
+                                fontSize = 28.sp,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(16.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -92,29 +116,5 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
-    }
-}
-
-@SuppressLint("RestrictedApi")
-@Composable
-fun MySpatialContent(overlayView: OverlayView) {
-    SpatialPanel(SubspaceModifier.width(1280.dp).height(800.dp).resizable().movable()) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // 카메라와 AI 바운딩 박스를 그려주는 도화지
-            AndroidView(
-                factory = { context -> overlayView },
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // ⚠️ 팬텀 모델이 없을 때 앱이 켜졌는지 확인하기 위한 테스트 텍스트 UI
-            Text(
-                text = "XR App Running... (Camera Active)",
-                color = Color.Green,
-                fontSize = 24.sp,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-            )
-        }
     }
 }

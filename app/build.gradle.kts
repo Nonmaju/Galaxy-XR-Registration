@@ -65,6 +65,8 @@ dependencies {
     implementation(libs.androidx.runtime)
     implementation(libs.androidx.scenecore)
     implementation(libs.extensions1.xr)
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
