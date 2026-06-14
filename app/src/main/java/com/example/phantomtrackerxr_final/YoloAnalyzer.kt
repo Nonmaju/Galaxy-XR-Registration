@@ -28,7 +28,7 @@ class YoloAnalyzer(
 
     init {
         val assetManager = context.assets
-        val fileDescriptor = assetManager.openFd("best_float32.tflite")
+        val fileDescriptor = assetManager.openFd("best_int8.tflite")
         val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
         val fileChannel = inputStream.channel
         val startOffset = fileDescriptor.startOffset
