@@ -55,6 +55,8 @@ class YoloAnalyzer(
     }
 
     override fun analyze(image: ImageProxy) {
+        Log.d("PhantomTracker", "📸 프레임 수신됨!")
+
         try {
             // 1. 카메라 프레임 방향 보정
             val originalBitmap = image.toBitmap()
@@ -75,11 +77,22 @@ class YoloAnalyzer(
                 byteBuffer.putFloat(b)
             }
 
-            // 3. 추론 실행
+            // 3. 추론 실행 및 시간 측정
+            val startTime = System.currentTimeMillis()
             interpreter.run(byteBuffer, outputBuffer)
+            val inferenceTime = System.currentTimeMillis() - startTime
 
             // 4. 결과 추출
-            onResult(extractBestBox(outputBuffer))
+            val bestBox = extractBestBox(outputBuffer)
+
+            // ⚠️ 수정: 배열 사이즈를 기준으로 명확하게 체크
+            if (bestBox.size >= 5) {
+                // 팬텀을 찾았을 때
+                onResult(floatArrayOf(bestBox[0], bestBox[1], bestBox[2], bestBox[3], bestBox[4], 0f, inferenceTime.toFloat()))
+            } else {
+                // 팬텀을 못 찾았을 때
+                onResult(floatArrayOf(-1f, -1f, -1f, -1f, -1f, -1f, inferenceTime.toFloat()))
+            }
 
             // ⚠️ 핵심 수정: 다 쓴 사진은 즉시 메모리에서 삭제합니다!
             originalBitmap.recycle()
