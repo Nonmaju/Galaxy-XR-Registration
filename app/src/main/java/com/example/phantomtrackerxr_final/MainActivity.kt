@@ -53,8 +53,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PhantomTrackerXR_FinalTheme {
-                // ⚠️ 말썽을 일으키던 환경 제어 코드는 모두 깔끔하게 날렸습니다.
-                // 대신 Subspace로 풀 스페이스 3D 공간만 확실하게 열어줍니다.
 
                 Subspace {
                     SpatialPanel(
