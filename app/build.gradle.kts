@@ -46,7 +46,16 @@ android {
             }
         }
     }
+}
 
+// 라이브러리 버전 충돌 강제 해결
+configurations.all {
+    resolutionStrategy {
+        force("org.tensorflow:tensorflow-lite:2.16.1")
+        force("org.tensorflow:tensorflow-lite-api:2.16.1")
+        force("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+        force("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    }
 }
 
 dependencies {
@@ -65,8 +74,19 @@ dependencies {
     implementation(libs.androidx.runtime)
     implementation(libs.androidx.scenecore)
     implementation(libs.extensions1.xr)
+    
+    // Support library 0.4.4 - API 모듈만 사용하여 네임스페이스 충돌 회피
+    implementation("org.tensorflow:tensorflow-lite-support-api:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+
+    // 카메라 유즈케이스
+    implementation("androidx.camera:camera-core:1.3.0")
+    implementation("androidx.camera:camera-camera2:1.3.0")
+    implementation("androidx.camera:camera-lifecycle:1.3.0")
+    implementation("androidx.camera:camera-view:1.3.0")
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -74,12 +94,4 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
-
-
-    // 아래 카메라와 TFLite만 추가합니다.
-    implementation("androidx.camera:camera-core:1.3.0")
-    implementation("androidx.camera:camera-camera2:1.3.0")
-    implementation("androidx.camera:camera-lifecycle:1.3.0")
-    implementation("androidx.camera:camera-view:1.3.0")
-    implementation("org.tensorflow:tensorflow-lite:2.16.1") // 이름표 중복 버그가 수정된 최신 버전
 }
