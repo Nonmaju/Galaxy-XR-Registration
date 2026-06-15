@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import java.util.Locale
 
 class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
@@ -53,7 +54,7 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
                 val score = boxResult[4]
 
                 canvas.drawRect(left, top, right, bottom, boxPaint)
-                canvas.drawText(String.format("Score: %.2f", score), left, top - 10f, textPaint)
+                canvas.drawText(String.format(Locale.US, "Score: %.2f", score), left, top - 10f, textPaint)
             }
         }
     }
