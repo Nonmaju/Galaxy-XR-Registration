@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,14 +23,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
+
+// XR 기본 레이아웃 Import
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.width
+import androidx.xr.compose.subspace.layout.offset
+
+// Alpha09 버전용 Scenecore Import
+import androidx.xr.compose.platform.LocalSession
+import androidx.xr.compose.subspace.SceneCoreEntity
+import androidx.xr.scenecore.GltfModel
+import androidx.xr.scenecore.GltfModelEntity
+
+// 🌟 Import 문 분리 완료
 import com.example.phantomtrackerxr_final.ui.theme.PhantomTrackerXR_FinalTheme
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -45,18 +59,45 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        // Depth 헬퍼 초기화 및 기긴 내 뎁스 센서 스캔
+        // Depth 헬퍼 초기화 및 기기 내 뎁스 센서 스캔
         depthCameraHelper = DepthCameraHelper(this)
         depthCameraHelper.findDepthCamera()
         depthCameraHelper.startDepthCamera()
 
-        // 권한 확인 및 요청
+        // 권한 확인
         if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
 
         setContent {
             PhantomTrackerXR_FinalTheme {
+                // 1. 팬텀의 3D 좌표를 저장할 상태 변수
+                var phantomPosition by remember { mutableStateOf<FloatArray?>(null) }
+
+                // 2. Helper에서 좌표를 계산할 때마다 업데이트
+                DisposableEffect(Unit) {
+                    depthCameraHelper.onCentroidCalculated = { centroid ->
+                        phantomPosition = centroid
+                    }
+                    onDispose { depthCameraHelper.onCentroidCalculated = null }
+                }
+
+                val session = LocalSession.current
+                var loadedGltfModel by remember { mutableStateOf<GltfModel?>(null) }
+
+                // 🌟 핵심 해결 1: GltfModel.create는 suspend 함수이므로 안전한 비동기 코루틴(LaunchedEffect) 안에서 로딩합니다!
+                LaunchedEffect(session) {
+                    if (session != null) {
+                        try {
+                            // alpha09에서는 platformAdapter를 직접 넘기는 것이 정석입니다.
+                            loadedGltfModel = GltfModel.create(session.platformAdapter, "phantom_model.glb")
+                            Log.d("PhantomTracker", "✅ 3D 모델 로딩 완료!")
+                        } catch (e: Exception) {
+                            Log.e("PhantomTracker", "❌ 모델 로딩 실패: ${e.message}")
+                        }
+                    }
+                }
+
                 Subspace {
                     SpatialPanel(
                         modifier = SubspaceModifier
@@ -65,7 +106,10 @@ class MainActivity : ComponentActivity() {
                             .movable()
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
-                            CameraPreviewWithOverlay(cameraExecutor = cameraExecutor)
+                            CameraPreviewWithOverlay(
+                                cameraExecutor = cameraExecutor,
+                                depthCameraHelper = depthCameraHelper
+                            )
 
                             // 생존 확인용 텍스트
                             Text(
@@ -78,6 +122,22 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+
+                    // 🌟 핵심 해결 2: 위치 데이터도 있고, 비동기 모델 로딩도 끝났을 때만 화면에 띄웁니다!
+                    if (phantomPosition != null && loadedGltfModel != null && session != null) {
+                        val pos = phantomPosition!!
+                        val posX = pos[0] / 1000f
+                        val posY = pos[1] / 1000f
+                        val posZ = pos[2] / 1000f
+
+                        // 🌟 핵심 해결 3: 인자 오류를 해결하기 위해 factory = { } 형태로 깔끔하게 호출합니다.
+                        SceneCoreEntity(
+                            factory = {
+                                GltfModelEntity.create(session.platformAdapter, loadedGltfModel!!)
+                            },
+                            modifier = SubspaceModifier.offset(x = posX.dp, y = posY.dp, z = posZ.dp)
+                        )
+                    }
                 }
             }
         }
@@ -88,24 +148,31 @@ class MainActivity : ComponentActivity() {
         cameraExecutor.shutdown()
     }
 }
-@Composable
-fun CameraPreviewWithOverlay(cameraExecutor: ExecutorService) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val overlayView = androidx.compose.runtime.remember { OverlayView(context, null) }
 
-    androidx.compose.runtime.DisposableEffect(Unit) {
+@Composable
+fun CameraPreviewWithOverlay(cameraExecutor: ExecutorService, depthCameraHelper: DepthCameraHelper) {
+    val context = LocalContext.current
+    val overlayView = remember { OverlayView(context, null) }
+
+    DisposableEffect(Unit) {
         val cameraProviderFuture = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
 
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
 
-            // 1. 포맷 강제 변환 등 불필요한 옵션을 빼고 가장 가볍게 분석기 세팅
             val imageAnalyzer = androidx.camera.core.ImageAnalysis.Builder()
                 .setBackpressureStrategy(androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor, YoloAnalyzer(context) { resultCoordinates ->
                         overlayView.post { overlayView.updateResults(resultCoordinates) }
+
+                        // 뎁스 계산을 위해 최신 바운딩 박스 좌표 전달
+                        if (resultCoordinates.isNotEmpty() && resultCoordinates[0] != -1f) {
+                            depthCameraHelper.latestYoloBox = resultCoordinates
+                        } else {
+                            depthCameraHelper.latestYoloBox = null
+                        }
                     })
                 }
 
@@ -113,16 +180,8 @@ fun CameraPreviewWithOverlay(cameraExecutor: ExecutorService) {
 
             try {
                 cameraProvider.unbindAll()
-
-                // ⚠️ 핵심 픽스 1: Subspace가 아닌 실제 Activity의 생명주기를 강제로 가져옴
                 val lifecycleOwner = context as ComponentActivity
-
-                // ⚠️ 핵심 픽스 2: 무한 대기를 유발하던 더미 프리뷰를 제거하고 오직 분석기만 바인딩
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    imageAnalyzer
-                )
+                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalyzer)
                 Log.d("PhantomTracker", "✅ 카메라 바인딩 완벽 성공!")
             } catch (exc: Exception) {
                 Log.e("PhantomTracker", "❌ 카메라 바인딩 실패: ${exc.message}")
