@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
-
+    private lateinit var depthCameraHelper: DepthCameraHelper
     private val requestPermissionLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
@@ -44,6 +44,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Depth 헬퍼 초기화 및 기긴 내 뎁스 센서 스캔
+        depthCameraHelper = DepthCameraHelper(this)
+        depthCameraHelper.findDepthCamera()
+        depthCameraHelper.startDepthCamera()
 
         // 권한 확인 및 요청
         if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -64,7 +69,7 @@ class MainActivity : ComponentActivity() {
 
                             // 생존 확인용 텍스트
                             Text(
-                                text = "🟢 Full Space Mode",
+                                text = "🟢 Home Space Mode",
                                 color = Color.Green,
                                 fontSize = 28.sp,
                                 modifier = Modifier

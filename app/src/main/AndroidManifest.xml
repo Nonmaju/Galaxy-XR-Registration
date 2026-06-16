@@ -22,10 +22,6 @@
             android:theme="@style/Theme.PhantomTrackerXR_Final"
             android:windowSoftInputMode="adjustResize">
 
-            <property
-                android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
-                android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED" />
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
