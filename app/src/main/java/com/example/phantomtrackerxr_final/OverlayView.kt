@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import java.util.Locale
 
 class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
@@ -18,46 +19,43 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
     }
 
     private val textPaint = Paint().apply {
-        color = Color.RED
-        textSize = 50f
+        color = Color.YELLOW // 배경과 잘 구분되도록 노란색으로 변경
+        textSize = 60f
         style = Paint.Style.FILL
+        setShadowLayer(5f, 2f, 2f, Color.BLACK) // 글씨가 더 잘 보이게 그림자 추가
     }
 
     fun updateResults(result: FloatArray) {
         boxResult = result
-        invalidate()
+        postInvalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        if (boxResult.size >= 5) {
-            // 수정: 모델의 실제 출력 포맷인 [ymin, xmin, ymax, xmax]에 맞게 그리기
-            val top = boxResult[0] * height
-            val left = boxResult[1] * width
-            val bottom = boxResult[2] * height
-            val right = boxResult[3] * width
-
-            val score = boxResult[4]
-            val classId = if (boxResult.size > 5) boxResult[5].toInt() else -1
-            val inferenceTime = if (boxResult.size > 6) boxResult[6].toInt() else 0
-
-            // 좌표를 바로 넣어서 사각형을 그립니다.
-            canvas.drawRect(left, top, right, bottom, boxPaint)
-
-            val infoText = "ID: $classId | Score: ${
-                String.format(
-                    "%.2f",
-                    score
-                )
-            } | Latency: ${inferenceTime}ms"
-            canvas.drawText(infoText, left, top - 10f, textPaint)
-
+        if (boxResult.size >= 7) {
+            // 1. 상태에 상관없이 무조건 FPS와 Latency부터 그리기
+            val inferenceTime = boxResult[6].toLong()
             val fps = if (inferenceTime > 0) 1000 / inferenceTime else 0
-            canvas.drawText("FPS: $fps", 50f, 100f, textPaint)
-        } else if (boxResult.size == 7) {
-            val inferenceTime = boxResult[6].toInt()
-            canvas.drawText("Latency: ${inferenceTime}ms", 50f, 50f, textPaint)
+            val statusText = if (boxResult[0] == -1f) "Status: Searching..." else "Status: Detected!"
+
+            canvas.drawText("GPU Latency: ${inferenceTime}ms | FPS: $fps", 50f, 100f, textPaint)
+            canvas.drawText(statusText, 50f, 180f, textPaint)
+
+            // 2. 팬텀을 찾았을 때만 빨간 박스 그리기
+            if (boxResult[0] != -1f) {
+                // ⚠️ 90도 회전 보정:
+                // Image Y(0, 2) -> View Y(top, bottom)
+                // Image X(1, 3) -> View X(left, right)
+                val top = boxResult[0] * height
+                val left = boxResult[1] * width
+                val bottom = boxResult[2] * height
+                val right = boxResult[3] * width
+                val score = boxResult[4]
+
+                canvas.drawRect(left, top, right, bottom, boxPaint)
+                canvas.drawText(String.format(Locale.US, "Score: %.2f", score), left, top - 10f, textPaint)
+            }
         }
     }
 }
