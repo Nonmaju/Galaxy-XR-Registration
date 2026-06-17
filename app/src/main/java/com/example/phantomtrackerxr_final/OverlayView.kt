@@ -34,7 +34,7 @@ class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs)
         super.onDraw(canvas)
 
         if (boxResult.size >= 7) {
-            // 1. 상태에 상관없이 무조건 FPS와 Latency부터 그리기!
+            // 1. 상태에 상관없이 무조건 FPS와 Latency부터 그리기
             val inferenceTime = boxResult[6].toLong()
             val fps = if (inferenceTime > 0) 1000 / inferenceTime else 0
             val statusText = if (boxResult[0] == -1f) "Status: Searching..." else "Status: Detected!"

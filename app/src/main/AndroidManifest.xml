@@ -2,9 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.HAND_TRACKING" />
+    <uses-permission android:name="android.permission.HEAD_TRACKING" />
+    <uses-permission android:name="android.permission.SCENE_UNDERSTANDING_COARSE" />
+    <uses-permission android:name="android.permission.SCENE_UNDERSTANDING_FINE" />
+
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="androidx.xr.creden.spatial_computing" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -16,6 +23,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PhantomTrackerXR_Final"
         tools:replace="android:allowBackup,android:label,android:theme">
+
+        <property
+            android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
+            android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

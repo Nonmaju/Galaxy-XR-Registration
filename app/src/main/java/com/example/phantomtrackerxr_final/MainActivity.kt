@@ -5,27 +5,24 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 
-// XR 기본 레이아웃 Import
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
@@ -33,142 +30,200 @@ import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.subspace.layout.offset
-
-// Alpha09 버전용 Scenecore Import
 import androidx.xr.compose.platform.LocalSession
-import androidx.xr.compose.subspace.SceneCoreEntity
 import androidx.xr.scenecore.GltfModel
 import androidx.xr.scenecore.GltfModelEntity
-
-import com.example.phantomtrackerxr_final.ui.theme.PhantomTrackerXR_FinalTheme
-import java.nio.file.Paths
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-
+import androidx.xr.arcore.RenderViewpoint
+import androidx.xr.scenecore.scene
+import androidx.xr.runtime.Config
 import androidx.xr.arcore.Anchor
 import androidx.xr.arcore.AnchorCreateSuccess
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.AnchorEntity
 
+import java.nio.file.Paths
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
 class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var depthCameraHelper: DepthCameraHelper
+    
+    private val requiredPermissions = arrayOf(
+        android.Manifest.permission.CAMERA,
+        "android.permission.HAND_TRACKING",
+        "android.permission.HEAD_TRACKING",
+        "android.permission.SCENE_UNDERSTANDING_COARSE",
+        "android.permission.SCENE_UNDERSTANDING_FINE"
+    )
+
     private val requestPermissionLauncher = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (!isGranted) Log.e("PhantomTracker", "Camera permission denied")
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.all { it }) Log.d("PhantomTracker", "✅ XR 권한 승인 완료")
     }
 
     @SuppressLint("RestrictedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+
         cameraExecutor = Executors.newSingleThreadExecutor()
-
-        // Depth 헬퍼 초기화 및 기기 내 뎁스 센서 스캔
         depthCameraHelper = DepthCameraHelper(this)
-        depthCameraHelper.findDepthCamera()
-        depthCameraHelper.startDepthCamera()
+        depthCameraHelper.startBackgroundThread()
 
-        // 권한 확인
-        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        if (requiredPermissions.any { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }) {
+            requestPermissionLauncher.launch(requiredPermissions)
         }
 
         setContent {
-            PhantomTrackerXR_FinalTheme {
-                // 1. 팬텀의 3D 좌표를 저장할 상태 변수
-                var phantomPosition by remember { mutableStateOf<FloatArray?>(null) }
+            val session = LocalSession.current
+            
+            var latency by remember { mutableLongStateOf(0L) }
+            var isDetected by remember { mutableStateOf(false) }
+            var debugInfo by remember { mutableStateOf("Ready to scan") }
+            var phantomPosition by remember { mutableStateOf<FloatArray?>(null) }
+            var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
 
-                // 2. Helper에서 좌표를 계산할 때마다 업데이트
+            LaunchedEffect(session) {
+                if (session != null) {
+                    try {
+                        session.scene.requestFullSpaceMode()
+                        val config = session.config.copy(
+                            depthEstimation = Config.DepthEstimationMode.RAW_ONLY,
+                            deviceTracking = Config.DeviceTrackingMode.LAST_KNOWN
+                        )
+                        session.configure(config)
+                    } catch (e: Exception) { Log.e("PhantomTracker", "Session Config Error", e) }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                CameraTracker(cameraExecutor, depthCameraHelper, session, 
+                    onMetricsUpdated = { currentLatency, status ->
+                        latency = currentLatency
+                        isDetected = (status == "Detected!")
+                    },
+                    onDebugInfoUpdated = { info -> debugInfo = info }
+                )
+
                 DisposableEffect(Unit) {
                     depthCameraHelper.onCentroidCalculated = { centroid ->
-                        phantomPosition = centroid
+                        if (anchorEntity == null) phantomPosition = centroid
                     }
                     onDispose { depthCameraHelper.onCentroidCalculated = null }
                 }
 
-                val session = LocalSession.current
-                var loadedGltfModel by remember { mutableStateOf<GltfModel?>(null) }
-
-                // GltfModel.create는 suspend 함수이므로 안전한 비동기 코루틴(LaunchedEffect) 안에서 로딩합니다!
-                LaunchedEffect(session) {
-                    if (session != null) {
-                        try {
-                            // alpha05+ 에서는 Session과 Path를 사용
-                            loadedGltfModel = GltfModel.create(session, Paths.get("phantom_model.glb"))
-                            Log.d("PhantomTracker", "✅ 3D 모델 로딩 완료!")
-                        } catch (e: Exception) {
-                            Log.e("PhantomTracker", "❌ 모델 로딩 실패: ${e.message}")
-                        }
-                    }
-                }
-
                 Subspace {
+                    // 1. 왼쪽 성능 HUD (글씨 키우고 중앙 정렬)
                     SpatialPanel(
                         modifier = SubspaceModifier
-                            .width(800.dp)
-                            .height(600.dp)
+                            .width(400.dp)
+                            .height(250.dp)
+                            .offset(x = (-400).dp, z = (-800).dp)
                             .movable()
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            CameraPreviewWithOverlay(
-                                cameraExecutor = cameraExecutor,
-                                depthCameraHelper = depthCameraHelper
-                            )
-
-                            // 생존 확인용 텍스트
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                                .padding(20.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(
-                                text = "🟢 Home Space Mode",
-                                color = Color.Green,
-                                fontSize = 28.sp,
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(16.dp)
+                                text = if (isDetected) "🟢 Status: Detected!" else "🔍 Status: Searching...",
+                                color = if (isDetected) Color.Green else Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Latency: ${latency}ms | FPS: ${if (latency > 0) 1000/latency else 0}",
+                                color = Color.LightGray,
+                                fontSize = 20.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = debugInfo,
+                                color = Color.Cyan,
+                                fontSize = 16.sp,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
 
-                    // 위치 데이터도 있고, 비동기 모델 로딩도 끝났을 때만 화면에 띄웁니다!
-                    if (phantomPosition != null && session != null) {
+                    // 2. 3D 중앙 좌표 표시 UI (원형 뱃지 스타일)
+                    if (phantomPosition != null) {
                         val pos = phantomPosition!!
-                        val posX = pos[0] / 1000f
-                        val posY = pos[1] / 1000f
-                        val posZ = pos[2] / 1000f // mm를 m로 변환
+                        SpatialPanel(
+                            modifier = SubspaceModifier
+                                .width(350.dp)
+                                .height(180.dp)
+                                .offset(x = 400.dp, z = (-800).dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFFE91E63).copy(alpha = 0.8f), RoundedCornerShape(100.dp)) // 핑크색 라운드
+                                    .border(4.dp, Color.White, RoundedCornerShape(100.dp))
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "🎯 PHANTOM CORE",
+                                        color = Color.White,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "X: ${"%.3f".format(pos[0])}m",
+                                        color = Color.White,
+                                        fontSize = 18.sp
+                                    )
+                                    Text(
+                                        "Y: ${"%.3f".format(pos[1])}m",
+                                        color = Color.White,
+                                        fontSize = 18.sp
+                                    )
+                                    Text(
+                                        "Z: ${"%.3f".format(pos[2])}m",
+                                        color = Color.White,
+                                        fontSize = 18.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                        // Anchor와 Model Entity 상태 관리
-                        var modelEntity by remember { mutableStateOf<GltfModelEntity?>(null) }
-                        var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
-
-                        LaunchedEffect(phantomPosition) {
+                    LaunchedEffect(phantomPosition) {
+                        if (phantomPosition != null && session != null && anchorEntity == null) {
                             try {
-                                // 1. Alpha 07 방식의 깔끔한 모델 로드 (동기 코드 참고)
+                                val pos = phantomPosition!!
+                                val viewpoint = RenderViewpoint.left(session) ?: return@LaunchedEffect
+                                val cameraPose = viewpoint.state.value.pose
+                                val worldPos = cameraPose.translation + cameraPose.rotation * Vector3(pos[0], pos[1], pos[2])
+                                
                                 val model = GltfModel.create(session, Paths.get("phantom_model.glb"))
                                 val gEntity = GltfModelEntity.create(session, model)
+                                gEntity.setScale(0.2f)
 
-                                // 크기가 너무 크면 조절 (동기 코드는 0.04f로 축소했음)
-                                gEntity.setScale(Vector3(1f, 1f, 1f))
-
-                                // 2. 핵심 비법: 현실 세계의 (x,y,z) 좌표에 Anchor 생성
-                                val targetPose = Pose(translation = Vector3(posX, posY, posZ))
-                                val anchorResult = Anchor.create(session, targetPose)
-
+                                val anchorResult = Anchor.create(session, Pose(translation = worldPos))
                                 if (anchorResult is AnchorCreateSuccess) {
-                                    val validAnchor = anchorResult.anchor
-                                    val aEntity = AnchorEntity.create(session, validAnchor)
-
-                                    // 3. 모델을 Anchor의 자식(parent)으로 설정하여 현실 공간에 고정!
+                                    val aEntity = AnchorEntity.create(session, anchorResult.anchor)
                                     gEntity.parent = aEntity
-
                                     anchorEntity = aEntity
-                                    modelEntity = gEntity
-                                    Log.d("PhantomTracker", "✅ 현실 세계 Anchor 생성 및 모델 부착 성공!")
-                                } else {
-                                    Log.e("PhantomTracker", "❌ Anchor 생성 실패")
+                                    depthCameraHelper.isAnchorPlaced = true
+                                    depthCameraHelper.stopDepthCamera()
                                 }
-                            } catch (e: Exception) {
-                                Log.e("PhantomTracker", "3D 렌더링 에러: ${e.message}")
-                            }
+                            } catch (e: Exception) { Log.e("PhantomTracker", "Placement Error", e) }
                         }
                     }
                 }
@@ -179,55 +234,58 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
+        depthCameraHelper.stopDepthCamera()
+        depthCameraHelper.stopBackgroundThread()
     }
 }
 
 @Composable
-fun CameraPreviewWithOverlay(cameraExecutor: ExecutorService, depthCameraHelper: DepthCameraHelper) {
+fun CameraTracker(
+    executor: ExecutorService, 
+    helper: DepthCameraHelper, 
+    session: androidx.xr.runtime.Session?,
+    onMetricsUpdated: (Long, String) -> Unit,
+    onDebugInfoUpdated: (String) -> Unit
+) {
     val context = LocalContext.current
-    val overlayView = remember { OverlayView(context, null) }
+    val previewView = remember { androidx.camera.view.PreviewView(context) }
 
-    DisposableEffect(Unit) {
-        val cameraProviderFuture = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
-
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-
-            val imageAnalyzer = androidx.camera.core.ImageAnalysis.Builder()
-                .setBackpressureStrategy(androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor, YoloAnalyzer(context) { resultCoordinates ->
-                        overlayView.post { overlayView.updateResults(resultCoordinates) }
-
-                        // 뎁스 계산을 위해 최신 바운딩 박스 좌표 전달
-                        if (resultCoordinates.isNotEmpty() && resultCoordinates[0] != -1f) {
-                            depthCameraHelper.latestYoloBox = resultCoordinates
-                        } else {
-                            depthCameraHelper.latestYoloBox = null
-                        }
-                    })
-                }
-
-            val cameraSelector = androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                val lifecycleOwner = context as ComponentActivity
-                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalyzer)
-                Log.d("PhantomTracker", "✅ 카메라 바인딩 완벽 성공!")
-            } catch (exc: Exception) {
-                Log.e("PhantomTracker", "❌ 카메라 바인딩 실패: ${exc.message}")
-            }
-        }, ContextCompat.getMainExecutor(context))
-
-        onDispose {
-            cameraProviderFuture.get().unbindAll()
-        }
+    Box(modifier = Modifier.size(1.dp).background(Color.Transparent)) {
+        AndroidView(factory = { previewView })
     }
 
-    AndroidView(
-        factory = { _ -> overlayView },
-        modifier = Modifier.fillMaxSize()
-    )
+    DisposableEffect(Unit) {
+        val providerFuture = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                val preview = androidx.camera.core.Preview.Builder().build().also { 
+                    it.setSurfaceProvider(previewView.surfaceProvider) 
+                }
+                val analyzer = androidx.camera.core.ImageAnalysis.Builder()
+                    .setBackpressureStrategy(androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also {
+                        it.setAnalyzer(executor, YoloAnalyzer(context) { res ->
+                            val latency = if (res.size >= 7) res[6].toLong() else 0L
+                            val status = if (helper.isAnchorPlaced) "Detected!" else if (res[0] != -1f) "Depth Sync..." else "Searching..."
+                            onMetricsUpdated(latency, status)
+
+                            if (res[0] != -1f) {
+                                onDebugInfoUpdated("Box: [${"%.1f".format(res[0])}, ${"%.1f".format(res[1])}]")
+                                if (!helper.isAnchorPlaced && session != null) {
+                                    helper.latestYoloBox = res
+                                    helper.startDepthStream(session)
+                                }
+                            } else {
+                                onDebugInfoUpdated("Waiting for object...")
+                            }
+                        })
+                    }
+                provider.unbindAll()
+                provider.bindToLifecycle(context as androidx.lifecycle.LifecycleOwner, androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA, preview, analyzer)
+            } catch (e: Exception) { Log.e("PhantomTracker", "Camera Bind Error", e) }
+        }, ContextCompat.getMainExecutor(context))
+        onDispose { providerFuture.get().unbindAll() }
+    }
 }
