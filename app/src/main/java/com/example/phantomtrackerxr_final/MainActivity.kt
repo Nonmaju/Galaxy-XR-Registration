@@ -40,10 +40,16 @@ import androidx.xr.compose.subspace.SceneCoreEntity
 import androidx.xr.scenecore.GltfModel
 import androidx.xr.scenecore.GltfModelEntity
 
-// 🌟 Import 문 분리 완료
 import com.example.phantomtrackerxr_final.ui.theme.PhantomTrackerXR_FinalTheme
+import java.nio.file.Paths
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+
+import androidx.xr.arcore.Anchor
+import androidx.xr.arcore.AnchorCreateSuccess
+import androidx.xr.runtime.math.Pose
+import androidx.xr.runtime.math.Vector3
+import androidx.xr.scenecore.AnchorEntity
 
 class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
@@ -85,12 +91,12 @@ class MainActivity : ComponentActivity() {
                 val session = LocalSession.current
                 var loadedGltfModel by remember { mutableStateOf<GltfModel?>(null) }
 
-                // 🌟 핵심 해결 1: GltfModel.create는 suspend 함수이므로 안전한 비동기 코루틴(LaunchedEffect) 안에서 로딩합니다!
+                // GltfModel.create는 suspend 함수이므로 안전한 비동기 코루틴(LaunchedEffect) 안에서 로딩합니다!
                 LaunchedEffect(session) {
                     if (session != null) {
                         try {
-                            // alpha09에서는 platformAdapter를 직접 넘기는 것이 정석입니다.
-                            loadedGltfModel = GltfModel.create(session.platformAdapter, "phantom_model.glb")
+                            // alpha05+ 에서는 Session과 Path를 사용
+                            loadedGltfModel = GltfModel.create(session, Paths.get("phantom_model.glb"))
                             Log.d("PhantomTracker", "✅ 3D 모델 로딩 완료!")
                         } catch (e: Exception) {
                             Log.e("PhantomTracker", "❌ 모델 로딩 실패: ${e.message}")
@@ -123,20 +129,47 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 🌟 핵심 해결 2: 위치 데이터도 있고, 비동기 모델 로딩도 끝났을 때만 화면에 띄웁니다!
-                    if (phantomPosition != null && loadedGltfModel != null && session != null) {
+                    // 위치 데이터도 있고, 비동기 모델 로딩도 끝났을 때만 화면에 띄웁니다!
+                    if (phantomPosition != null && session != null) {
                         val pos = phantomPosition!!
                         val posX = pos[0] / 1000f
                         val posY = pos[1] / 1000f
-                        val posZ = pos[2] / 1000f
+                        val posZ = pos[2] / 1000f // mm를 m로 변환
 
-                        // 🌟 핵심 해결 3: 인자 오류를 해결하기 위해 factory = { } 형태로 깔끔하게 호출합니다.
-                        SceneCoreEntity(
-                            factory = {
-                                GltfModelEntity.create(session.platformAdapter, loadedGltfModel!!)
-                            },
-                            modifier = SubspaceModifier.offset(x = posX.dp, y = posY.dp, z = posZ.dp)
-                        )
+                        // Anchor와 Model Entity 상태 관리
+                        var modelEntity by remember { mutableStateOf<GltfModelEntity?>(null) }
+                        var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
+
+                        LaunchedEffect(phantomPosition) {
+                            try {
+                                // 1. Alpha 07 방식의 깔끔한 모델 로드 (동기 코드 참고)
+                                val model = GltfModel.create(session, Paths.get("phantom_model.glb"))
+                                val gEntity = GltfModelEntity.create(session, model)
+
+                                // 크기가 너무 크면 조절 (동기 코드는 0.04f로 축소했음)
+                                gEntity.setScale(Vector3(1f, 1f, 1f))
+
+                                // 2. 핵심 비법: 현실 세계의 (x,y,z) 좌표에 Anchor 생성
+                                val targetPose = Pose(translation = Vector3(posX, posY, posZ))
+                                val anchorResult = Anchor.create(session, targetPose)
+
+                                if (anchorResult is AnchorCreateSuccess) {
+                                    val validAnchor = anchorResult.anchor
+                                    val aEntity = AnchorEntity.create(session, validAnchor)
+
+                                    // 3. 모델을 Anchor의 자식(parent)으로 설정하여 현실 공간에 고정!
+                                    gEntity.parent = aEntity
+
+                                    anchorEntity = aEntity
+                                    modelEntity = gEntity
+                                    Log.d("PhantomTracker", "✅ 현실 세계 Anchor 생성 및 모델 부착 성공!")
+                                } else {
+                                    Log.e("PhantomTracker", "❌ Anchor 생성 실패")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("PhantomTracker", "3D 렌더링 에러: ${e.message}")
+                            }
+                        }
                     }
                 }
             }

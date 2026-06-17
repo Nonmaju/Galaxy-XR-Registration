@@ -20,17 +20,17 @@ class DepthCameraHelper(private val context: Context) {
     var depthCameraId: String? = null
         private set
 
-    // 🌟 추가: 카메라 장치와 데이터를 받을 ImageReader 변수
+    // 카메라 장치와 데이터를 받을 ImageReader 변수
     private var cameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
-    // 🌟 추가: 카메라 캡처 세션을 관리할 변수
+    // 카메라 캡처 세션을 관리할 변수
     private var captureSession: CameraCaptureSession? = null
-    // 🌟 새로 추가: YOLO가 찾은 최신 바운딩 박스를 실시간으로 저장할 변수
+    // YOLO가 찾은 최신 바운딩 박스를 실시간으로 저장할 변수
     var latestYoloBox: FloatArray? = null
-    // 🌟 추가: 중심점이 계산되었을 때 MainActivity로 값을 전달할 콜백 함수
+    // 중심점이 계산되었을 때 MainActivity로 값을 전달할 콜백 함수
     var onCentroidCalculated: ((FloatArray) -> Unit)? = null
 
-    // 🌟 추가: 뎁스맵 해상도 및 3D 계산을 위한 내부 파라미터(Intrinsics)
+    // 뎁스맵 해상도 및 3D 계산을 위한 내부 파라미터(Intrinsics)
     var depthWidth: Int = 0
         private set
     var depthHeight: Int = 0
@@ -68,7 +68,7 @@ class DepthCameraHelper(private val context: Context) {
     }
 
     /**
-     * 🌟 추가: 뎁스 카메라를 열고 ImageReader를 세팅합니다.
+     * 뎁스 카메라를 열고 ImageReader를 세팅합니다.
      */
     @SuppressLint("MissingPermission") // 권한은 MainActivity에서 이미 체크함
     fun startDepthCamera() {
@@ -86,12 +86,12 @@ class DepthCameraHelper(private val context: Context) {
             val depthSizes = map?.getOutputSizes(ImageFormat.DEPTH16)
             val bestSize = depthSizes?.firstOrNull() ?: android.util.Size(640, 480)
 
-            // 🌟 1. 해상도 저장
+            // 1. 해상도 저장
             depthWidth = bestSize.width
             depthHeight = bestSize.height
             Log.d("PhantomTracker", "해상도 선택: ${bestSize.width} x ${bestSize.height}")
 
-            // 🌟 2. 내부 파라미터(Intrinsic) 추출 및 저장
+            // 2. 내부 파라미터(Intrinsic) 추출 및 저장
             val intrinsics = characteristics.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)
             if (intrinsics != null && intrinsics.size >= 5) {
                 fx = intrinsics[0]
@@ -114,7 +114,7 @@ class DepthCameraHelper(private val context: Context) {
                 val image = reader.acquireLatestImage()
                 if (image != null) {
                     try {
-                        // 🌟 임시 하드코딩 삭제하고, MainActivity에서 넘어온 최신 YOLO 좌표 가져오기
+                        // MainActivity에서 넘어온 최신 YOLO 좌표 가져오기
                         val currentYoloBox = latestYoloBox
 
                         // 만약 YOLO가 아직 팬텀을 못 찾아서 좌표가 없으면 이번 뎁스 프레임은 무시하고 패스
@@ -138,7 +138,7 @@ class DepthCameraHelper(private val context: Context) {
                         if (centroid != null) {
                             Log.d("PhantomTracker", "🎯 팬텀 중심점 자동 발견: X=${centroid[0]}, Y=${centroid[1]}, Z=${centroid[2]}")
 
-                            // 🌟 추가: UI 스레드로 3D 좌표 전달
+                            // UI 스레드로 3D 좌표 전달
                             // Compose 상태 업데이트를 위해 메인 스레드에서 실행되도록 합니다.
                             context.mainExecutor.execute {
                                 onCentroidCalculated?.invoke(centroid)
@@ -158,7 +158,7 @@ class DepthCameraHelper(private val context: Context) {
                 override fun onOpened(camera: CameraDevice) {
                     cameraDevice = camera
                     Log.d("PhantomTracker", "✅ 뎁스 카메라 Open 성공!")
-                    // 🌟 추가: 카메라가 열리면 프레임 요청 세션을 시작합니다.
+                    //  카메라가 열리면 프레임 요청 세션을 시작합니다.
                     createCaptureSession()
                 }
 
@@ -179,7 +179,7 @@ class DepthCameraHelper(private val context: Context) {
         }
     }
 
-    // 🌟 새로 추가: 캡처 세션을 만들고 반복 요청을 보내는 함수
+    // 캡처 세션을 만들고 반복 요청을 보내는 함수
     private fun createCaptureSession() {
         val device = cameraDevice ?: return
         val surface = imageReader?.surface ?: return
@@ -222,7 +222,7 @@ class DepthCameraHelper(private val context: Context) {
     }
 
     /**
-     * 🌟 새로 추가: YOLO의 2D 바운딩 박스를 뎁스맵의 실제 픽셀 좌표(ROI)로 변환합니다.
+     * YOLO의 2D 바운딩 박스를 뎁스맵의 실제 픽셀 좌표(ROI)로 변환합니다.
      * @param yoloBox [top, left, bottom, right] (YoloAnalyzer에서 추출한 0.0 ~ 1.0 비율)
      * @return [depthTop, depthLeft, depthBottom, depthRight] (뎁스맵 픽셀 단위)
      */
@@ -240,7 +240,7 @@ class DepthCameraHelper(private val context: Context) {
     }
 
     /**
-     * 🌟 새로 추가: DEPTH16 이미지와 ROI를 받아 3D Point Cloud(밀리미터 단위)를 추출합니다.
+     * DEPTH16 이미지와 ROI를 받아 3D Point Cloud(밀리미터 단위)를 추출합니다.
      * @param depthImage Camera2에서 받아온 DEPTH16 포맷의 이미지
      * @param roi [top, left, bottom, right] 뎁스맵 기준의 픽셀 좌표
      * @return 3D 좌표 배열의 리스트 [ [x, y, z], [x, y, z], ... ]
@@ -265,7 +265,7 @@ class DepthCameraHelper(private val context: Context) {
         // ROI 영역만 순회하며 Z값을 뽑아냅니다.
         for (v in top..bottom) {
             for (u in left..right) {
-                // ⚠️ 핵심: 2차원 좌표(u, v)를 1차원 버퍼 인덱스로 변환 (Stride 고려 필수!)
+                // 핵심: 2차원 좌표(u, v)를 1차원 버퍼 인덱스로 변환 (Stride 고려 필수!)
                 val index = (v * rowStride) + (u * pixelStride)
 
                 // 버퍼 초과 접근 방지 (안전 장치)
@@ -294,7 +294,7 @@ class DepthCameraHelper(private val context: Context) {
     }
 
     /**
-     * 🌟 새로 추가: 노이즈 필터링 (Z값 기준 표준편차 활용)
+     * 노이즈 필터링 (Z값 기준 표준편차 활용)
      * @param rawPoints 필터링 전의 원본 3D 포인트 리스트
      * @return 튀는 값(Outlier)이 제거된 깔끔한 포인트 리스트
      */
@@ -315,7 +315,7 @@ class DepthCameraHelper(private val context: Context) {
     }
 
     /**
-     * 🌟 새로 추가: 필터링된 포인트 클라우드의 3D 중심점(Centroid) 계산
+     * 필터링된 포인트 클라우드의 3D 중심점(Centroid) 계산
      * @param points 노이즈가 제거된 포인트 리스트
      * @return 중심점 좌표 [X_mean, Y_mean, Z_mean] (계산 불가 시 null 반환)
      */
