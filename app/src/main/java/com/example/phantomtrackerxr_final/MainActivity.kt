@@ -204,24 +204,32 @@ class MainActivity : ComponentActivity() {
                     }
 
                     LaunchedEffect(phantomPosition) {
-                        if (phantomPosition != null && session != null && anchorEntity == null) {
+                        val currentPos = phantomPosition
+                        val currentSession = session
+                        if (currentPos != null && currentSession != null && anchorEntity == null) {
                             try {
-                                val pos = phantomPosition!!
-                                val viewpoint = RenderViewpoint.left(session) ?: return@LaunchedEffect
+                                // 1. 현재 카메라 Pose를 원점 기준으로 가져옴
+                                val viewpoint = RenderViewpoint.left(currentSession) ?: return@LaunchedEffect
                                 val cameraPose = viewpoint.state.value.pose
-                                val worldPos = cameraPose.translation + cameraPose.rotation * Vector3(pos[0], pos[1], pos[2])
                                 
-                                val model = GltfModel.create(session, Paths.get("phantom_model.glb"))
-                                val gEntity = GltfModelEntity.create(session, model)
-                                gEntity.setScale(0.2f)
+                                // 2. 카메라 기준 로컬 좌표 -> 월드(세션 원점) 좌표로 변환
+                                val worldPos = cameraPose.translation + cameraPose.rotation * Vector3(currentPos[0], currentPos[1], currentPos[2])
+                                
+                                // 3. 3D 모델 로드 및 엔티티 생성 
+                                val model = GltfModel.create(currentSession, java.nio.file.Paths.get("phantom_model.glb"))
+                                val gEntity = GltfModelEntity.create(currentSession, model)
+                                gEntity.setScale(0.5f) // 모델 크기 조정
 
-                                val anchorResult = Anchor.create(session, Pose(translation = worldPos))
+                                // 4. 계산된 위치에 앵커 생성 및 모델 부착
+                                val anchorResult = Anchor.create(currentSession, Pose(translation = worldPos))
                                 if (anchorResult is AnchorCreateSuccess) {
-                                    val aEntity = AnchorEntity.create(session, anchorResult.anchor)
-                                    gEntity.parent = aEntity
+                                    val aEntity = AnchorEntity.create(currentSession, anchorResult.anchor)
+                                    gEntity.parent = aEntity // 앵커 엔티티의 자식으로 모델 추가
                                     anchorEntity = aEntity
+                                    
                                     depthCameraHelper.isAnchorPlaced = true
                                     depthCameraHelper.stopDepthCamera()
+                                    Log.d("PhantomTracker", "✅ Phantom Mesh Placed at: $worldPos")
                                 }
                             } catch (e: Exception) { Log.e("PhantomTracker", "Placement Error", e) }
                         }
@@ -248,10 +256,20 @@ fun CameraTracker(
     onDebugInfoUpdated: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val frameLayout = remember { android.widget.FrameLayout(context) }
     val previewView = remember { androidx.camera.view.PreviewView(context) }
+    val overlayView = remember { OverlayView(context, null) }
 
-    Box(modifier = Modifier.size(1.dp).background(Color.Transparent)) {
-        AndroidView(factory = { previewView })
+    Box(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { 
+                frameLayout.apply {
+                    addView(previewView)
+                    addView(overlayView)
+                }
+            }
+        )
     }
 
     DisposableEffect(Unit) {
@@ -271,14 +289,18 @@ fun CameraTracker(
                             val status = if (helper.isAnchorPlaced) "Detected!" else if (res[0] != -1f) "Depth Sync..." else "Searching..."
                             onMetricsUpdated(latency, status)
 
+                            // OverlayView 직접 갱신 (Compose 상태 변화를 거치지 않아 연산량 감소)
+                            overlayView.updateResults(res)
+
                             if (res[0] != -1f) {
-                                onDebugInfoUpdated("Box: [${"%.1f".format(res[0])}, ${"%.1f".format(res[1])}]")
+                                // ymin, xmin, ymax, xmax 4개 좌표 모두 표시
+                                onDebugInfoUpdated("Box: [${"%.2f".format(res[1])}, ${"%.2f".format(res[0])}, ${"%.2f".format(res[3])}, ${"%.2f".format(res[2])}]")
                                 if (!helper.isAnchorPlaced && session != null) {
                                     helper.latestYoloBox = res
                                     helper.startDepthStream(session)
                                 }
                             } else {
-                                onDebugInfoUpdated("Waiting for object...")
+                                onDebugInfoUpdated("Searching for Phantom...")
                             }
                         })
                     }
