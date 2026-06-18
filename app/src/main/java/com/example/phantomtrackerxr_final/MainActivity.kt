@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -86,6 +87,7 @@ class MainActivity : ComponentActivity() {
             var isDetected by remember { mutableStateOf(false) }
             var yoloResult by remember { mutableStateOf(floatArrayOf(-1f, -1f, -1f, -1f, -1f, -1f, 0f)) }
             var phantomPosition by remember { mutableStateOf<FloatArray?>(null) }
+            var pointCloud by remember { mutableStateOf<List<FloatArray>>(emptyList()) }
             var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
 
             LaunchedEffect(session) {
@@ -137,11 +139,41 @@ class MainActivity : ComponentActivity() {
                     depthCameraHelper.onCentroidCalculated = { centroid ->
                         if (anchorEntity == null) phantomPosition = centroid
                     }
-                    onDispose { depthCameraHelper.onCentroidCalculated = null }
+                    depthCameraHelper.onPointsUpdated = { points ->
+                        pointCloud = points
+                    }
+                    onDispose { 
+                        depthCameraHelper.onCentroidCalculated = null 
+                        depthCameraHelper.onPointsUpdated = null
+                    }
                 }
 
                 Subspace {
-                    // 1. 왼쪽 성능 HUD
+                    // 1. 왼쪽 성능 HUD (생략)
+                    
+                    // 2. 포인트 클라우드 시각화 패널 (2배 확대: 600x600)
+                    SpatialPanel(
+                        modifier = SubspaceModifier
+                            .width(600.dp)
+                            .height(600.dp)
+                            .offset(x = 0.dp, y = (-300).dp, z = (-700).dp)
+                            .movable()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("☁️ Point Cloud View", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                PointCloudVisualizer(points = pointCloud)
+                            }
+                        }
+                    }
+
+                    // 3. 기존 HUD 및 좌표 표시 UI (offset 유지하며 뒤로 밀기)
                     SpatialPanel(
                         modifier = SubspaceModifier
                             .width(400.dp)
@@ -225,6 +257,31 @@ class MainActivity : ComponentActivity() {
         cameraExecutor.shutdown()
         depthCameraHelper.stopDepthCamera()
         depthCameraHelper.stopBackgroundThread()
+    }
+}
+
+@Composable
+fun PointCloudVisualizer(points: List<FloatArray>) {
+    Canvas(modifier = Modifier.fillMaxSize().background(Color.DarkGray.copy(alpha = 0.3f))) {
+        val center = size / 2f
+        // 배율을 다시 원래대로(150f) 복구
+        val scale = 150f 
+
+        points.forEach { p ->
+            // 정면 뷰 (X, Y) 투영
+            val drawX = center.width + (p[0] * scale)
+            val drawY = center.height - (p[1] * scale)
+            
+            // 거리에 따라 색상 변경 (가까울수록 노란색, 멀수록 보라색)
+            val zNorm = (p[2].coerceIn(-3f, -0.1f) + 3f) / 2.9f
+            val color = androidx.compose.ui.graphics.lerp(Color.Yellow, Color.Magenta, 1f - zNorm)
+
+            drawCircle(
+                color = color,
+                radius = 2.5f,
+                center = androidx.compose.ui.geometry.Offset(drawX, drawY)
+            )
+        }
     }
 }
 

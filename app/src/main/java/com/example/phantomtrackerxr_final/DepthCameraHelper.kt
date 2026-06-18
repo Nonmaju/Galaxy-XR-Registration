@@ -17,6 +17,7 @@ class DepthCameraHelper(private val context: Context) {
     var isAnchorPlaced = false
     var latestYoloBox: FloatArray? = null
     var onCentroidCalculated: ((FloatArray) -> Unit)? = null
+    var onPointsUpdated: ((List<FloatArray>) -> Unit)? = null
 
     private var depthJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
@@ -90,7 +91,11 @@ class DepthCameraHelper(private val context: Context) {
         val vStart = (box[0] * depthHeight).toInt().coerceIn(0, depthHeight - 1)
         val vEnd = (box[2] * depthHeight).toInt().coerceIn(0, depthHeight - 1)
 
+        Log.d("PhantomTracker", "📦 [YOLO BOX RAW] ymin:${box[0]}, xmin:${box[1]}, ymax:${box[2]}, xmax:${box[3]}")
+        Log.d("PhantomTracker", "🔍 [BOX SCAN] 영역: U($uStart~$uEnd), V($vStart~$vEnd) | DepthSize:${depthWidth}x${depthHeight}")
+
         val fov = viewpoint.fieldOfView
+        val pointCloud = mutableListOf<FloatArray>()
         var sumX = 0f
         var sumY = 0f
         var sumZ = 0f
@@ -99,28 +104,35 @@ class DepthCameraHelper(private val context: Context) {
         Log.d("PhantomTracker", "🔍 [BOX SCAN] 영역: U($uStart~$uEnd), V($vStart~$vEnd)")
 
         // 2. 박스 내부의 모든 픽셀을 순회하며 3D 좌표 추출 (Point Cloud 수집)
-        // 박스가 너무 클 경우를 대비해 필요시 샘플링(step)을 적용할 수 있으나 현재는 전수 조사
         for (vIdx in vStart..vEnd) {
             for (uIdx in uStart..uEnd) {
                 val depth = rawDepth.get(vIdx * depthWidth + uIdx)
 
-                // 유효한 거리 내의 포인트만 정점으로 인정 (배경 및 노이즈 제외)
-                if (depth > 0.05f && depth < 3.0f) { 
+                if (depth > 0.05f && depth < 3.0f) {
                     val normX = uIdx.toFloat() / depthWidth
                     val normY = vIdx.toFloat() / depthHeight
 
-                    // 3. 광선 방향 계산 (LERP)
                     val rayTanX = tan(fov.angleLeft) + normX * (tan(fov.angleRight) - tan(fov.angleLeft))
                     val rayTanY = tan(fov.angleUp) + normY * (tan(fov.angleDown) - tan(fov.angleUp))
 
-                    // 4. 3D 좌표 변환 및 합산
-                    sumX += rayTanX * depth
-                    sumY += rayTanY * depth
-                    sumZ += -depth
-                    
+                    val vx = rayTanX * depth
+                    val vy = rayTanY * depth
+                    val vz = -depth
+
+                    val point = floatArrayOf(vx, vy, vz)
+                    pointCloud.add(point)
+
+                    sumX += vx
+                    sumY += vy
+                    sumZ += vz
                     validPointCount++
                 }
             }
+        }
+        
+        // UI 시각화를 위해 포인트 리스트 전달
+        context.mainExecutor.execute {
+            onPointsUpdated?.invoke(pointCloud)
         }
 
         // 5. 유효한 포인트가 충분할 때만 평균값(Centroid) 반환
