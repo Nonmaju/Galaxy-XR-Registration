@@ -49,7 +49,7 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var depthCameraHelper: DepthCameraHelper
-    
+
     private val requiredPermissions = arrayOf(
         android.Manifest.permission.CAMERA,
         "android.permission.HAND_TRACKING",
@@ -81,10 +81,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val session = LocalSession.current
-            
+
             var latency by remember { mutableLongStateOf(0L) }
             var isDetected by remember { mutableStateOf(false) }
-            var debugInfo by remember { mutableStateOf("Ready to scan") }
+            var yoloResult by remember { mutableStateOf(floatArrayOf(-1f, -1f, -1f, -1f, -1f, -1f, 0f)) }
             var phantomPosition by remember { mutableStateOf<FloatArray?>(null) }
             var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
 
@@ -102,13 +102,36 @@ class MainActivity : ComponentActivity() {
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
-                CameraTracker(cameraExecutor, depthCameraHelper, session, 
-                    onMetricsUpdated = { currentLatency, status ->
-                        latency = currentLatency
-                        isDetected = (status == "Detected!")
-                    },
-                    onDebugInfoUpdated = { info -> debugInfo = info }
+                CameraTracker(cameraExecutor, depthCameraHelper, session,
+                    onResultUpdated = { res ->
+                        yoloResult = res
+                        latency = if (res.size >= 7) res[6].toLong() else 0L
+                        isDetected = (res[0] != -1f)
+                    }
                 )
+
+                /* 🌟 2) YOLO 바운딩 박스 시각화 (2D Overlay)
+                if (yoloResult[0] != -1f) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val screenWidth = this.maxWidth
+                        val screenHeight = this.maxHeight
+                        val res = yoloResult
+                        
+                        // YOLO 출력: [ymin, xmin, ymax, xmax] (0~1 정규화 가정)
+                        val top = res[0] * screenHeight.value
+                        val left = res[1] * screenWidth.value
+                        val bottom = res[2] * screenHeight.value
+                        val right = res[3] * screenWidth.value
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = left.dp, y = top.dp)
+                                .size(width = (right - left).dp, height = (bottom - top).dp)
+                                .border(3.dp, Color.Red, RoundedCornerShape(4.dp))
+                        )
+                    }
+                }
+                */
 
                 DisposableEffect(Unit) {
                     depthCameraHelper.onCentroidCalculated = { centroid ->
@@ -118,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Subspace {
-                    // 1. 왼쪽 성능 HUD (글씨 키우고 중앙 정렬)
+                    // 1. 왼쪽 성능 HUD
                     SpatialPanel(
                         modifier = SubspaceModifier
                             .width(400.dp)
@@ -143,18 +166,19 @@ class MainActivity : ComponentActivity() {
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Latency: ${latency}ms | FPS: ${if (latency > 0) 1000/latency else 0}",
+                                text = "Latency: ${latency}ms",
                                 color = Color.LightGray,
                                 fontSize = 20.sp,
                                 textAlign = TextAlign.Center
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = debugInfo,
-                                color = Color.Cyan,
-                                fontSize = 16.sp,
-                                textAlign = TextAlign.Center
-                            )
+                            // 좌표 데이터 HUD에 표시
+                            if (yoloResult[0] != -1f) {
+                                Text(
+                                    text = "Box: [${"%.2f".format(yoloResult[1])}, ${"%.2f".format(yoloResult[0])}]",
+                                    color = Color.Yellow,
+                                    fontSize = 16.sp
+                                )
+                            }
                         }
                     }
 
@@ -170,69 +194,26 @@ class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color(0xFFE91E63).copy(alpha = 0.8f), RoundedCornerShape(100.dp)) // 핑크색 라운드
-                                    .border(4.dp, Color.White, RoundedCornerShape(100.dp))
+                                    .background(Color(0xFFE91E63).copy(alpha = 0.8f), RoundedCornerShape(20.dp))
                                     .padding(16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        "🎯 PHANTOM CORE",
-                                        color = Color.White,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        "X: ${"%.3f".format(pos[0])}m",
-                                        color = Color.White,
-                                        fontSize = 18.sp
-                                    )
-                                    Text(
-                                        "Y: ${"%.3f".format(pos[1])}m",
-                                        color = Color.White,
-                                        fontSize = 18.sp
-                                    )
-                                    Text(
-                                        "Z: ${"%.3f".format(pos[2])}m",
-                                        color = Color.White,
-                                        fontSize = 18.sp
-                                    )
+                                    Text("🎯 PHANTOM CORE", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                                    Text("X: ${"%.3f".format(pos[0])} Y: ${"%.3f".format(pos[1])} Z: ${"%.3f".format(pos[2])}", color = Color.White, fontSize = 18.sp)
                                 }
                             }
                         }
                     }
 
-                    LaunchedEffect(phantomPosition) {
-                        val currentPos = phantomPosition
-                        val currentSession = session
-                        if (currentPos != null && currentSession != null && anchorEntity == null) {
-                            try {
-                                // 1. 현재 카메라 Pose를 원점 기준으로 가져옴
-                                val viewpoint = RenderViewpoint.left(currentSession) ?: return@LaunchedEffect
-                                val cameraPose = viewpoint.state.value.pose
-                                
-                                // 2. 카메라 기준 로컬 좌표 -> 월드(세션 원점) 좌표로 변환
-                                val worldPos = cameraPose.translation + cameraPose.rotation * Vector3(currentPos[0], currentPos[1], currentPos[2])
-                                
-                                // 3. 3D 모델 로드 및 엔티티 생성 
-                                val model = GltfModel.create(currentSession, java.nio.file.Paths.get("phantom_model.glb"))
-                                val gEntity = GltfModelEntity.create(currentSession, model)
-                                gEntity.setScale(0.5f) // 모델 크기 조정
-
-                                // 4. 계산된 위치에 앵커 생성 및 모델 부착
-                                val anchorResult = Anchor.create(currentSession, Pose(translation = worldPos))
-                                if (anchorResult is AnchorCreateSuccess) {
-                                    val aEntity = AnchorEntity.create(currentSession, anchorResult.anchor)
-                                    gEntity.parent = aEntity // 앵커 엔티티의 자식으로 모델 추가
-                                    anchorEntity = aEntity
-                                    
-                                    depthCameraHelper.isAnchorPlaced = true
-                                    depthCameraHelper.stopDepthCamera()
-                                    Log.d("PhantomTracker", "✅ Phantom Mesh Placed at: $worldPos")
-                                }
-                            } catch (e: Exception) { Log.e("PhantomTracker", "Placement Error", e) }
-                        }
+                    // 5) 앵커 기반 메시 배치
+                    if (phantomPosition != null && session != null && anchorEntity == null) {
+                        val pos = phantomPosition!!
+                        PlacedEntityBasedOnAnchor(
+                            xrSession = session,
+                            x = pos[0], y = pos[1], z = pos[2],
+                            onAnchorCreated = { anchorEntity = it }
+                        )
                     }
                 }
             }
@@ -249,27 +230,16 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CameraTracker(
-    executor: ExecutorService, 
-    helper: DepthCameraHelper, 
+    executor: ExecutorService,
+    helper: DepthCameraHelper,
     session: androidx.xr.runtime.Session?,
-    onMetricsUpdated: (Long, String) -> Unit,
-    onDebugInfoUpdated: (String) -> Unit
+    onResultUpdated: (FloatArray) -> Unit
 ) {
     val context = LocalContext.current
-    val frameLayout = remember { android.widget.FrameLayout(context) }
     val previewView = remember { androidx.camera.view.PreviewView(context) }
-    val overlayView = remember { OverlayView(context, null) }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { 
-                frameLayout.apply {
-                    addView(previewView)
-                    addView(overlayView)
-                }
-            }
-        )
+    Box(modifier = Modifier.size(1.dp).background(Color.Transparent)) {
+        AndroidView(factory = { previewView })
     }
 
     DisposableEffect(Unit) {
@@ -277,30 +247,18 @@ fun CameraTracker(
         providerFuture.addListener({
             try {
                 val provider = providerFuture.get()
-                val preview = androidx.camera.core.Preview.Builder().build().also { 
-                    it.setSurfaceProvider(previewView.surfaceProvider) 
+                val preview = androidx.camera.core.Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
                 }
                 val analyzer = androidx.camera.core.ImageAnalysis.Builder()
                     .setBackpressureStrategy(androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also {
                         it.setAnalyzer(executor, YoloAnalyzer(context) { res ->
-                            val latency = if (res.size >= 7) res[6].toLong() else 0L
-                            val status = if (helper.isAnchorPlaced) "Detected!" else if (res[0] != -1f) "Depth Sync..." else "Searching..."
-                            onMetricsUpdated(latency, status)
-
-                            // OverlayView 직접 갱신 (Compose 상태 변화를 거치지 않아 연산량 감소)
-                            overlayView.updateResults(res)
-
-                            if (res[0] != -1f) {
-                                // ymin, xmin, ymax, xmax 4개 좌표 모두 표시
-                                onDebugInfoUpdated("Box: [${"%.2f".format(res[1])}, ${"%.2f".format(res[0])}, ${"%.2f".format(res[3])}, ${"%.2f".format(res[2])}]")
-                                if (!helper.isAnchorPlaced && session != null) {
-                                    helper.latestYoloBox = res
-                                    helper.startDepthStream(session)
-                                }
-                            } else {
-                                onDebugInfoUpdated("Searching for Phantom...")
+                            onResultUpdated(res)
+                            if (res[0] != -1f && !helper.isAnchorPlaced && session != null) {
+                                helper.latestYoloBox = res
+                                helper.startDepthStream(session)
                             }
                         })
                     }
@@ -309,5 +267,51 @@ fun CameraTracker(
             } catch (e: Exception) { Log.e("PhantomTracker", "Camera Bind Error", e) }
         }, ContextCompat.getMainExecutor(context))
         onDispose { providerFuture.get().unbindAll() }
+    }
+}
+
+@Composable
+fun PlacedEntityBasedOnAnchor(
+    xrSession: androidx.xr.runtime.Session,
+    x: Float,
+    y: Float,
+    z: Float,
+    onAnchorCreated: (AnchorEntity) -> Unit
+) {
+    var modelEntity by remember { mutableStateOf<GltfModelEntity?>(null) }
+    var anchorEntity by remember { mutableStateOf<AnchorEntity?>(null) }
+
+    Log.i("PhantomTracker", "추출된 좌표: $x, $y, $z")
+
+    LaunchedEffect(Unit) {
+        try {
+            // 1. 모델 로드
+            val model = GltfModel.create(xrSession, Paths.get("phantom_model.glb"))
+            val gEntity = GltfModelEntity.create(xrSession, model)
+            gEntity.setScale(0.2f)
+
+            // 2. Local -> World 변환 (Viewpoint Pose 적용)
+            val viewpoint = RenderViewpoint.left(xrSession) ?: return@LaunchedEffect
+            val cameraPose = viewpoint.state.value.pose
+            val worldPos = cameraPose.translation + cameraPose.rotation * Vector3(x, y, z)
+
+            // 3. Anchor 생성
+            val targetPose = Pose(translation = worldPos)
+            val anchorResult = Anchor.create(xrSession, targetPose)
+
+            if (anchorResult is AnchorCreateSuccess) {
+                val aEntity = AnchorEntity.create(xrSession, anchorResult.anchor)
+                gEntity.parent = aEntity
+
+                anchorEntity = aEntity
+                modelEntity = gEntity
+                onAnchorCreated(aEntity)
+                Log.i("PhantomTracker", "앵커 생성 및 모델 부착 성공!")
+            } else {
+                Log.e("PhantomTracker", "앵커 생성 실패: $anchorResult")
+            }
+        } catch (e: Exception) {
+            Log.e("PhantomTracker", "Placement Error", e)
+        }
     }
 }

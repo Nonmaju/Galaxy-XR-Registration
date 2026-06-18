@@ -6,43 +6,35 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
-import java.util.Locale
 
 class OverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+    private var boundingBox: FloatArray? = null
 
-    private var boxResult: FloatArray = floatArrayOf()
-
+    // 사각형 테두리를 그릴 페인트 설정
     private val boxPaint = Paint().apply {
         color = Color.RED
         style = Paint.Style.STROKE
-        strokeWidth = 6f
+        strokeWidth = 8f
     }
 
-    private val textPaint = Paint().apply {
-        color = Color.CYAN
-        textSize = 40f
-        style = Paint.Style.FILL
-        setShadowLayer(5f, 2f, 2f, Color.BLACK)
-    }
-
-    fun updateResults(result: FloatArray) {
-        boxResult = result
-        postInvalidateOnAnimation()
+    // YOLO 좌표를 업데이트하고 화면을 다시 그리도록 요청하는 함수
+    fun updateBoundingBox(box: FloatArray?) {
+        this.boundingBox = box
+        postInvalidate() // UI 스레드 밖에서도 안전하게 화면 갱신(onDraw 호출)
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        if (boxResult.size >= 7) {
-            // 1. 팬텀을 찾았을 때만 빨간 박스 그리기
-            if (boxResult[0] != -1f) {
-                val top = boxResult[0] * height
-                val left = boxResult[1] * width
-                val bottom = boxResult[2] * height
-                val right = boxResult[3] * width
-                
-                canvas.drawRect(left, top, right, bottom, boxPaint)
-            }
+        // boundingBox가 null이 아니면 사각형을 그립니다
+        boundingBox?.let { box ->
+            // 보통 YOLO 결과는 [top, left, bottom, right, score] 형태입니다.
+            val top = box[0]
+            val left = box[1]
+            val bottom = box[2]
+            val right = box[3]
+
+            canvas.drawRect(left, top, right, bottom, boxPaint)
         }
     }
 }

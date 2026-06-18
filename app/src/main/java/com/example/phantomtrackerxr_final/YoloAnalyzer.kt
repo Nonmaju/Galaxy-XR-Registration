@@ -41,7 +41,7 @@ class YoloAnalyzer(
         // 기기가 GPU Delegate를 지원하는지 확인
         val options = Interpreter.Options()
         val compatList = CompatibilityList()
-        
+
         if (compatList.isDelegateSupportedOnThisDevice) {
             // GPU Delegate를 사용할 수 있는 경우 기기에 가장 최적화된 GPU 옵션을 가져와서 적용
             val delegateOptions = compatList.bestOptionsForThisDevice
@@ -65,9 +65,9 @@ class YoloAnalyzer(
         try {
             val bitmap = image.toBitmap()
             val rotationDegrees = image.imageInfo.rotationDegrees
-            
+
             Log.d("PhantomTracker", "분석 시작 - Image size: ${image.width}x${image.height}, Rotation: $rotationDegrees")
-            
+
             val rotatedBitmap = if (rotationDegrees != 0) {
                 val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
                 Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
